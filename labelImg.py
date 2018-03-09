@@ -9,20 +9,9 @@ import subprocess
 from functools import partial
 from collections import defaultdict
 
-try:
-    from PyQt5.QtGui import *
-    from PyQt5.QtCore import *
-    from PyQt5.QtWidgets import *
-except ImportError:
-    # needed for py3+qt4
-    # Ref:
-    # http://pyqt.sourceforge.net/Docs/PyQt4/incompatible_apis.html
-    # http://stackoverflow.com/questions/21217399/pyqt4-qtcore-qvariant-object-instead-of-a-string
-    if sys.version_info.major >= 3:
-        import sip
-        sip.setapi('QVariant', 2)
-    from PyQt4.QtGui import *
-    from PyQt4.QtCore import *
+from PyQt5.QtGui import *
+from PyQt5.QtCore import *
+from PyQt5.QtWidgets import *
 
 import resources
 # Add internal libs
@@ -41,10 +30,13 @@ from libs.pascal_voc_io import XML_EXT
 from libs.ustr import ustr
 from libs.version import __version__
 
+from pprint import pprint
+
 __appname__ = 'labelImg'
 
 # Utility functions and classes.
 
+#TODO Get rid of this - only supporting python3 + qt5
 def have_qstring():
     '''p3/qt5 get rid of QString wrapper as py3 has native unicode str type'''
     return not (sys.version_info.major >= 3 or QT_VERSION_STR.startswith('5.'))
@@ -54,7 +46,10 @@ def util_qt_strlistclass():
 
 
 class WindowMixin(object):
-
+    """
+    This is the main window that all the other windows go in
+    I think
+    """
     def menu(self, title, actions=None):
         menu = self.menuBar().addMenu(title)
         if actions:
@@ -90,10 +85,12 @@ class MainWindow(QMainWindow, WindowMixin):
         self.setWindowTitle(__appname__)
 
         # Load setting in the main thread
+        ##TODO Add labels and label colors in settings
         self.settings = Settings()
         self.settings.load()
         settings = self.settings
 
+        ##Do File Things
         # Save as Pascal voc xml
         self.defaultSaveDir = None
         self.usingPascalVocFormat = True
@@ -113,65 +110,26 @@ class MainWindow(QMainWindow, WindowMixin):
 
         # Load predefined classes to the list
         self.loadPredefinedClasses(defaultPrefdefClassFile)
-
-        # Main widgets and related state.
-        self.labelDialog = LabelDialog(parent=self, listItem=self.labelHist)
-
         self.itemsToShapes = {}
         self.shapesToItems = {}
         self.prevLabelText = ''
 
-        listLayout = QVBoxLayout()
-        listLayout.setContentsMargins(0, 0, 0, 0)
-
-        # Create a widget for using default label
-        self.useDefaultLabelCheckbox = QCheckBox(u'Use default label')
-        self.useDefaultLabelCheckbox.setChecked(False)
-        self.defaultLabelTextLine = QLineEdit()
-        useDefaultLabelQHBoxLayout = QHBoxLayout()
-        useDefaultLabelQHBoxLayout.addWidget(self.useDefaultLabelCheckbox)
-        useDefaultLabelQHBoxLayout.addWidget(self.defaultLabelTextLine)
-        useDefaultLabelContainer = QWidget()
-        useDefaultLabelContainer.setLayout(useDefaultLabelQHBoxLayout)
+        #Start adding things to window for UI
+        useDefaultLabelContainer = self.main_window_ui_label_dialog_default()
+        #TODO I don't know what this is and will probably get rid of it
+        self.main_window_ui_difficult_button()
 
         # Create a widget for edit and diffc button
-        self.diffcButton = QCheckBox(u'difficult')
-        self.diffcButton.setChecked(False)
-        self.diffcButton.stateChanged.connect(self.btnstate)
         self.editButton = QToolButton()
         self.editButton.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
 
-        # Add some of widgets to listLayout
-        listLayout.addWidget(self.editButton)
-        listLayout.addWidget(self.diffcButton)
-        listLayout.addWidget(useDefaultLabelContainer)
-
-        # Create and add a widget for showing current label items
-        self.labelList = QListWidget()
-        labelListContainer = QWidget()
-        labelListContainer.setLayout(listLayout)
-        self.labelList.itemActivated.connect(self.labelSelectionChanged)
-        self.labelList.itemSelectionChanged.connect(self.labelSelectionChanged)
-        self.labelList.itemDoubleClicked.connect(self.editLabel)
-        # Connect to itemChanged to detect checkbox changes.
-        self.labelList.itemChanged.connect(self.labelItemChanged)
-        listLayout.addWidget(self.labelList)
+        labelListContainer = self.main_window_ui_label_list_widget(useDefaultLabelContainer)
 
         self.dock = QDockWidget(u'Box Labels', self)
         self.dock.setObjectName(u'Labels')
         self.dock.setWidget(labelListContainer)
 
-        # Tzutalin 20160906 : Add file list and dock to move faster
-        self.fileListWidget = QListWidget()
-        self.fileListWidget.itemDoubleClicked.connect(self.fileitemDoubleClicked)
-        filelistLayout = QVBoxLayout()
-        filelistLayout.setContentsMargins(0, 0, 0, 0)
-        filelistLayout.addWidget(self.fileListWidget)
-        fileListContainer = QWidget()
-        fileListContainer.setLayout(filelistLayout)
-        self.filedock = QDockWidget(u'File List', self)
-        self.filedock.setObjectName(u'Files')
-        self.filedock.setWidget(fileListContainer)
+        self.main_window_ui_file_list_widget()
 
         self.zoomWidget = ZoomWidget()
         self.colorDialog = ColorDialog(parent=self)
@@ -243,9 +201,13 @@ class MainWindow(QMainWindow, WindowMixin):
                         'Ctrl+L', 'color_line', u'Choose Box line color')
 
         createMode = action('Create\nRectBox', self.setCreateMode,
-                            'w', 'new', u'Start drawing Boxs', enabled=False)
+                            'w', 'new', u'Start drawing Boxes', enabled=False)
         editMode = action('&Edit\nRectBox', self.setEditMode,
-                          'Ctrl+J', 'edit', u'Move and edit Boxs', enabled=False)
+                          'Ctrl+J', 'edit', u'Move and edit Boxes', enabled=False)
+        ##TODO Toggle Pixel List
+        togglePixelList = action('&Toggle\nPixel List', self.chshapeTogglePixelList,
+                                 'Ctrl+H', 'toggle' u'Toggle the pixelList',
+                                 enabled=True)
 
         create = action('Create\nRectBox', self.createShape,
                         'w', 'new', u'Draw a new Box', enabled=False)
@@ -326,7 +288,7 @@ class MainWindow(QMainWindow, WindowMixin):
         # Store actions for further handling.
         self.actions = struct(save=save, saveAs=saveAs, open=open, close=close, resetAll = resetAll,
                               lineColor=color1, create=create, delete=delete, edit=edit, copy=copy,
-                              createMode=createMode, editMode=editMode, advancedMode=advancedMode,
+                              createMode=createMode, editMode=editMode, advancedMode=advancedMode, togglePixelList=togglePixelList,
                               shapeLineColor=shapeLineColor, shapeFillColor=shapeFillColor,
                               zoom=zoom, zoomIn=zoomIn, zoomOut=zoomOut, zoomOrg=zoomOrg,
                               fitWindow=fitWindow, fitWidth=fitWidth,
@@ -336,7 +298,7 @@ class MainWindow(QMainWindow, WindowMixin):
                               beginner=(), advanced=(),
                               editMenu=(edit, copy, delete,
                                         None, color1),
-                              beginnerContext=(create, edit, copy, delete),
+                              beginnerContext=(create, edit, copy, delete, togglePixelList),
                               advancedContext=(createMode, editMode, edit, copy,
                                                delete, shapeLineColor, shapeFillColor),
                               onLoadActive=(
@@ -463,6 +425,75 @@ class MainWindow(QMainWindow, WindowMixin):
         # Open Dir if deafult file
         if self.filePath and os.path.isdir(self.filePath):
             self.openDirDialog(dirpath=self.filePath)
+
+    def main_window_ui_file_list_widget(self):
+        """
+        Add the fileList Widget to the main window
+        :return:
+        """
+        # Tzutalin 20160906 : Add file list and dock to move faster
+        self.fileListWidget = QListWidget()
+        self.fileListWidget.itemDoubleClicked.connect(self.fileitemDoubleClicked)
+        filelistLayout = QVBoxLayout()
+        filelistLayout.setContentsMargins(0, 0, 0, 0)
+        filelistLayout.addWidget(self.fileListWidget)
+        fileListContainer = QWidget()
+        fileListContainer.setLayout(filelistLayout)
+        self.filedock = QDockWidget(u'File List', self)
+        self.filedock.setObjectName(u'Files')
+        self.filedock.setWidget(fileListContainer)
+
+    def main_window_ui_label_list_widget(self, useDefaultLabelContainer):
+        """
+        Add the labelList widget to UI  - List of labels
+        This is not terribly useful when you have hundreds of labels...
+        :return:
+        """
+        listLayout = QVBoxLayout()
+        listLayout.setContentsMargins(0, 0, 0, 0)
+        listLayout.addWidget(self.editButton)
+        listLayout.addWidget(self.diffcButton)
+        listLayout.addWidget(useDefaultLabelContainer)
+
+        # Create and add a widget for showing current label items
+        self.labelList = QListWidget()
+        labelListContainer = QWidget()
+        labelListContainer.setLayout(listLayout)
+        self.labelList.itemActivated.connect(self.labelSelectionChanged)
+        self.labelList.itemSelectionChanged.connect(self.labelSelectionChanged)
+        self.labelList.itemDoubleClicked.connect(self.editLabel)
+        # Connect to itemChanged to detect checkbox changes.
+        self.labelList.itemChanged.connect(self.labelItemChanged)
+        listLayout.addWidget(self.labelList)
+
+        return labelListContainer
+
+    def main_window_ui_difficult_button(self):
+        """
+        Add difficult label to UI
+        :return:
+        """
+        self.diffcButton = QCheckBox(u'difficult')
+        self.diffcButton.setChecked(False)
+        self.diffcButton.stateChanged.connect(self.btnstate)
+
+    ##Begin Setup UI
+    def main_window_ui_label_dialog_default(self):
+        ##Start Define UI
+        # Main widgets and related state.
+        self.labelDialog = LabelDialog(parent=self, listItem=self.labelHist)
+
+        # Create a widget for using default label
+        self.useDefaultLabelCheckbox = QCheckBox(u'Use default label')
+        self.useDefaultLabelCheckbox.setChecked(False)
+        self.defaultLabelTextLine = QLineEdit()
+        useDefaultLabelQHBoxLayout = QHBoxLayout()
+        useDefaultLabelQHBoxLayout.addWidget(self.useDefaultLabelCheckbox)
+        useDefaultLabelQHBoxLayout.addWidget(self.defaultLabelTextLine)
+        useDefaultLabelContainer = QWidget()
+        useDefaultLabelContainer.setLayout(useDefaultLabelQHBoxLayout)
+
+        return useDefaultLabelContainer
 
     ## Support Functions ##
 
@@ -692,9 +723,10 @@ class MainWindow(QMainWindow, WindowMixin):
         del self.itemsToShapes[item]
 
     def loadLabels(self, shapes):
+        print('Load Labels')
         s = []
-        for label, points, line_color, fill_color, difficult in shapes:
-            shape = Shape(label=label)
+        for label, points, line_color, fill_color, difficult, pixelList in shapes:
+            shape = Shape(label=label, pixelList=pixelList)
             for x, y in points:
                 shape.addPoint(QPointF(x, y))
             shape.difficult = difficult
@@ -730,7 +762,7 @@ class MainWindow(QMainWindow, WindowMixin):
                         difficult = s.difficult)
 
         shapes = [format_shape(shape) for shape in self.canvas.shapes]
-        # Can add differrent annotation formats here
+        # Can add different annotation formats here
         try:
             if self.usingPascalVocFormat is True:
                 print ('Img: ' + self.filePath + ' -> Its xml: ' + annotationFilePath)
@@ -759,6 +791,11 @@ class MainWindow(QMainWindow, WindowMixin):
             self.diffcButton.setChecked(shape.difficult)
 
     def labelItemChanged(self, item):
+        """
+        TODO Add Hooks for things changing!
+        :param item:
+        :return:
+        """
         shape = self.itemsToShapes[item]
         label = item.text()
         if label != shape.label:
@@ -770,9 +807,10 @@ class MainWindow(QMainWindow, WindowMixin):
 
     # Callback functions:
     def newShape(self):
-        """Pop-up and give focus to the label editor.
-
+        """
+        Pop-up and give focus to the label editor.
         position MUST be in global coordinates.
+        TODO Add Gimp Hook Here!!!!!
         """
         if not self.useDefaultLabelCheckbox.isChecked() or not self.defaultLabelTextLine.text():
             if len(self.labelHist) > 0:
@@ -807,6 +845,9 @@ class MainWindow(QMainWindow, WindowMixin):
         else:
             # self.canvas.undoLastLine()
             self.canvas.resetAllLines()
+        ##Create Mask Here
+        print('Created a new shape')
+        pprint(shape)
 
     def scrollRequest(self, delta, orientation):
         units = - delta / (8 * 15)
@@ -977,6 +1018,7 @@ class MainWindow(QMainWindow, WindowMixin):
         super(MainWindow, self).resizeEvent(event)
 
     def paintCanvas(self):
+        print('Painting Canvas')
         assert not self.image.isNull(), "cannot paint null image"
         self.canvas.scale = 0.01 * self.zoomWidget.value()
         self.canvas.adjustSize()
@@ -1043,12 +1085,15 @@ class MainWindow(QMainWindow, WindowMixin):
         extensions = ['.jpeg', '.jpg', '.png', '.bmp']
         images = []
 
-        for root, dirs, files in os.walk(folderPath):
-            for file in files:
-                if file.lower().endswith(tuple(extensions)):
-                    relativePath = os.path.join(root, file)
-                    path = ustr(os.path.abspath(relativePath))
-                    images.append(path)
+        self.defaultSaveDir = folderPath
+        ##TODO Add option for recursive walk
+        # for root, dirs, files in os.walk(folderPath):
+        for file in os.listdir(folderPath):
+            if file.lower().endswith(tuple(extensions)):
+                # relativePath = os.path.join(root, file)
+                relativePath = os.path.join(folderPath, file)
+                path = ustr(os.path.abspath(relativePath))
+                images.append(path)
         images.sort(key=lambda x: x.lower())
         return images
 
@@ -1294,6 +1339,14 @@ class MainWindow(QMainWindow, WindowMixin):
             self.canvas.selectedShape.fill_color = color
             self.canvas.update()
             self.setDirty()
+
+    def chshapeTogglePixelList(self):
+        if self.canvas.selectedShape.displayPixelList is True:
+            self.canvas.selectedShape.displayPixelList = False
+        else:
+            self.canvas.selectedShape.displayPixelList = True
+        self.canvas.update()
+        self.setDirty()
 
     def copyShape(self):
         self.canvas.endMove(copy=True)

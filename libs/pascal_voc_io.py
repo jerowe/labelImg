@@ -1,17 +1,21 @@
 #!/usr/bin/env python
 # -*- coding: utf8 -*-
 import sys
+import os
 from xml.etree import ElementTree
 from xml.etree.ElementTree import Element, SubElement
 from lxml import etree
 import codecs
+import cv2
+import pickle
 
 XML_EXT = '.xml'
 ENCODE_METHOD = 'utf-8'
 
+
 class PascalVocWriter:
 
-    def __init__(self, foldername, filename, imgSize,databaseSrc='Unknown', localImgPath=None):
+    def __init__(self, foldername, filename, imgSize, databaseSrc='Unknown', localImgPath=None):
         self.foldername = foldername
         self.filename = filename
         self.databaseSrc = databaseSrc
@@ -28,8 +32,8 @@ class PascalVocWriter:
         root = etree.fromstring(rough_string)
         return etree.tostring(root, pretty_print=True, encoding=ENCODE_METHOD).replace("  ".encode(), "\t".encode())
         # minidom does not support UTF-8
-        '''reparsed = minidom.parseString(rough_string)
-        return reparsed.toprettyxml(indent="\t", encoding=ENCODE_METHOD)'''
+        # '''reparsed = minidom.parseString(rough_string)
+        # return reparsed.toprettyxml(indent="\t", encoding=ENCODE_METHOD)'''
 
     def genXML(self):
         """
@@ -75,9 +79,18 @@ class PascalVocWriter:
         return top
 
     def addBndBox(self, xmin, ymin, xmax, ymax, name, difficult):
-        bndbox = {'xmin': xmin, 'ymin': ymin, 'xmax': xmax, 'ymax': ymax}
-        bndbox['name'] = name
-        bndbox['difficult'] = difficult
+        """
+        TODO - Find out where this hooks
+        Add if statement for threshold mask
+        :param xmin:
+        :param ymin:
+        :param xmax:
+        :param ymax:
+        :param name:
+        :param difficult:
+        :return:
+        """
+        bndbox = {'xmin': xmin, 'ymin': ymin, 'xmax': xmax, 'ymax': ymax, 'name': name, 'difficult': difficult}
         self.boxlist.append(bndbox)
 
     def appendObjects(self, top):
@@ -92,15 +105,16 @@ class PascalVocWriter:
             pose = SubElement(object_item, 'pose')
             pose.text = "Unspecified"
             truncated = SubElement(object_item, 'truncated')
-            if int(each_object['ymax']) == int(self.imgSize[0]) or (int(each_object['ymin'])== 1):
-                truncated.text = "1" # max == height or min
-            elif (int(each_object['xmax'])==int(self.imgSize[1])) or (int(each_object['xmin'])== 1):
-                truncated.text = "1" # max == width or min
+            if int(each_object['ymax']) == int(self.imgSize[0]) or (int(each_object['ymin']) == 1):
+                truncated.text = "1"  # max == height or min
+            elif (int(each_object['xmax']) == int(self.imgSize[1])) or (int(each_object['xmin']) == 1):
+                truncated.text = "1"  # max == width or min
             else:
                 truncated.text = "0"
             difficult = SubElement(object_item, 'difficult')
-            difficult.text = str( bool(each_object['difficult']) & 1 )
+            difficult.text = str(bool(each_object['difficult']) & 1)
             bndbox = SubElement(object_item, 'bndbox')
+            ##TODO This can be a function
             xmin = SubElement(bndbox, 'xmin')
             xmin.text = str(each_object['xmin'])
             ymin = SubElement(bndbox, 'ymin')
@@ -133,10 +147,15 @@ class PascalVocReader:
         self.shapes = []
         self.filepath = filepath
         self.verified = False
+        self.base_name = os.path.splitext(os.path.basename(filepath))[0]
+        self.dir_name = os.path.dirname(filepath)
+        self.masks_path = os.path.join(self.dir_name, self.base_name, 'masks')
         try:
             self.parseXML()
         except:
             pass
+
+        print('Masks Path is {}'.format(self.masks_path))
 
     def getShapes(self):
         return self.shapes
@@ -147,7 +166,31 @@ class PascalVocReader:
         xmax = int(bndbox.find('xmax').text)
         ymax = int(bndbox.find('ymax').text)
         points = [(xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax)]
-        self.shapes.append((label, points, None, None, difficult))
+        pixelList = self.readMask(label, xmin, ymin, xmax, ymax)
+        self.shapes.append((label, points, None, None, difficult, pixelList))
+
+    def readMask(self, label, xmin, ymin, xmax, ymax):
+        """
+        Read the mask with cv2
+        Mask is only within the bounding box - transform coordinates
+        Get all locs ins mask that are equal to 0 and add xmin, ymin
+        :return: pixelList [(x,y)]
+        """
+        mask_path = os.path.join(self.masks_path, '{}-{}-xmin{}-xmax{}-ymin{}-ymax{}.png'.format(self.base_name, label, xmin, xmax, ymin, ymax))
+        pickle_path = os.path.join(self.masks_path, '{}-{}-xmin{}-xmax{}-ymin{}-ymax{}.pb'.format(self.base_name, label, xmin, xmax, ymin, ymax))
+        pixelList = []
+        # return pixelList
+        if os.path.isfile(pickle_path):
+            pixelList = pickle.load(open(pickle_path, "rb"))
+        elif os.path.isfile(mask_path):
+            mask = cv2.imread(mask_path, 0)
+            for r in range(mask.shape[0]):
+                for c in range(mask.shape[1]):
+                    if mask[r,c] == 0:
+                      pixelList.append((c + xmin, r + ymin))
+            pickle.dump(pixelList, open(pickle_path, "wb"))
+        return pixelList
+
 
     def parseXML(self):
         assert self.filepath.endswith(XML_EXT), "Unsupport file format"

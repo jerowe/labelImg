@@ -1,13 +1,7 @@
 
-try:
-    from PyQt5.QtGui import *
-    from PyQt5.QtCore import *
-    from PyQt5.QtWidgets import *
-except ImportError:
-    from PyQt4.QtGui import *
-    from PyQt4.QtCore import *
-
-#from PyQt4.QtOpenGL import *
+from PyQt5.QtGui import *
+from PyQt5.QtCore import *
+from PyQt5.QtWidgets import *
 
 from libs.shape import Shape
 from libs.lib import distance
@@ -17,8 +11,6 @@ CURSOR_POINT = Qt.PointingHandCursor
 CURSOR_DRAW = Qt.CrossCursor
 CURSOR_MOVE = Qt.ClosedHandCursor
 CURSOR_GRAB = Qt.OpenHandCursor
-
-# class Canvas(QGLWidget):
 
 
 class Canvas(QWidget):
@@ -364,14 +356,14 @@ class Canvas(QWidget):
             self.selectedShape = None
             self.setHiding(False)
             self.selectionChanged.emit(False)
-            self.update()
+            # self.update()
 
     def deleteSelected(self):
         if self.selectedShape:
             shape = self.selectedShape
             self.shapes.remove(self.selectedShape)
             self.selectedShape = None
-            self.update()
+            # self.update()
             return shape
 
     def copySelectedShape(self):
@@ -465,6 +457,7 @@ class Canvas(QWidget):
         return not (0 <= p.x() <= w and 0 <= p.y() <= h)
 
     def finalise(self):
+        print('Finalise')
         assert self.current
         if self.current.points[0] == self.current.points[-1]:
             self.current = None
@@ -650,6 +643,7 @@ class Canvas(QWidget):
         self.repaint()
 
     def loadShapes(self, shapes):
+        print('Load Shapes!')
         self.shapes = list(shapes)
         self.current = None
         self.repaint()

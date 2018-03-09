@@ -2,15 +2,13 @@
 # -*- coding: utf-8 -*-
 
 
-try:
-    from PyQt5.QtGui import *
-    from PyQt5.QtCore import *
-except ImportError:
-    from PyQt4.QtGui import *
-    from PyQt4.QtCore import *
+# try:
+from PyQt5.QtGui import *
+from PyQt5.QtCore import *
+from pprint import pprint
 
 from libs.lib import distance
-import sys
+import sys, random
 
 DEFAULT_LINE_COLOR = QColor(0, 255, 0, 128)
 DEFAULT_FILL_COLOR = QColor(255, 0, 0, 128)
@@ -34,15 +32,21 @@ class Shape(object):
     vertex_fill_color = DEFAULT_VERTEX_FILL_COLOR
     hvertex_fill_color = DEFAULT_HVERTEX_FILL_COLOR
     point_type = P_ROUND
-    point_size = 8
+    point_size = 4
     scale = 1.0
 
-    def __init__(self, label=None, line_color=None,difficult = False):
+    def __init__(self, label=None, line_color=None, difficult=False, pixelList=None):
         self.label = label
         self.points = []
         self.fill = False
         self.selected = False
         self.difficult = difficult
+        self.mask = None
+        self.pixelList = pixelList
+        #TODO Make this a setting
+        self.displayPixelList = True
+        self.painted = False
+        self.uuid = None
 
         self._highlightIndex = None
         self._highlightMode = self.NEAR_VERTEX
@@ -83,6 +87,7 @@ class Shape(object):
         self._closed = False
 
     def paint(self, painter):
+        # print('In Paint....')
         if self.points:
             color = self.select_line_color if self.selected else self.line_color
             pen = QPen(color)
@@ -115,6 +120,7 @@ class Shape(object):
             for point in self.points:
                 min_x = min(min_x, point.x())
                 min_y = min(min_y, point.y())
+            ##TODO Don't know what this does...
             if min_x != sys.maxsize and min_y != sys.maxsize:
                 font = QFont()
                 font.setPointSize(8)
@@ -124,11 +130,43 @@ class Shape(object):
                     self.label = ""
                 painter.drawText(min_x, min_y, self.label)
 
-            if self.fill:
-                color = self.select_fill_color if self.selected else self.fill_color
-                painter.fillPath(line_path, color)
+            # if self.fill:
+            #     color = self.select_fill_color if self.selected else self.fill_color
+            #     painter.fillPath(line_path, color)
+
+            # if self.displayPixelList is True and self.pixelList is not None:
+            if self.displayPixelList is True:
+                # pprint(self.points)
+                ##Pretty sure it should be this way
+                if self.points[0]:
+                    ##Reinitialize - no size
+                    pen = QPen(color)
+                    painter.setPen(pen)
+                    min_x = self.points[0].x()
+                    min_y = self.points[0].y()
+                    max_x = self.points[0].x()
+                    max_y = self.points[0].y()
+                    for point in self.points:
+                        min_x = min(min_x, point.x())
+                        min_y = min(min_y, point.y())
+                        max_x = max(max_x, point.x())
+                        max_y = max(max_y, point.y())
+
+                    # print('Xmin: {} Ymin: {} Xmax: {} Ymax: {}'.format(min_x, min_y, max_x, max_y))
+                    if not self.pixelList:
+                        self.pixelList = []
+                        for i in range(500):
+                            x = random.randint(min_x, max_x - 1)
+                            y = random.randint(min_y, max_y - 1)
+                            self.pixelList.append((x, y))
+                            painter.drawPoint(x, y)
+                            self.painted = True
+                    else:
+                        for point in self.pixelList:
+                            painter.drawPoint(point[0], point[1])
 
     def drawVertex(self, path, i):
+        # print('Drawing Vertex!')
         d = self.point_size / self.scale
         shape = self.point_type
         point = self.points[i]
@@ -198,3 +236,9 @@ class Shape(object):
 
     def __setitem__(self, key, value):
         self.points[key] = value
+
+    def generate_mask(self):
+        """
+        Use OpenCV to generate the mask
+        :return:
+        """
